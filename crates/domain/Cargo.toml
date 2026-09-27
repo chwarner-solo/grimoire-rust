@@ -1,0 +1,8 @@
+[package]
+name = "domain"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+thiserror = { workspace = true}
+uuid = {workspace = true}
