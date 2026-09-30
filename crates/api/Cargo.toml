@@ -1,16 +1,24 @@
 [package]
-name = "adapters"
+name = "api"
 edition.workspace = true
 version.workspace = true
 
 [dependencies]
 app = { path = "../app" }
 domain = { path = "../domain" }
+adapters = { path = "../adapters" }
 async-trait = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 uuid = { workspace = true }
+
+# API-specific — not shared with other crates
+axum = "0.7"
+jsonwebtoken = "9"
+reqwest = { version = "0.12", features = ["json"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors"] }

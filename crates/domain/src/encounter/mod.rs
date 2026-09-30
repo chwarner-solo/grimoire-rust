@@ -1,10 +1,12 @@
+use serde::{Deserialize, Serialize};
+
 use crate::shared::{Metadata, Prose, UserId};
 use crate::story::StoryId;
 use crate::session::SessionId;
 use crate::traits::{Aggregate, Apply};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EncounterId(Uuid);
 
 impl EncounterId {
@@ -15,13 +17,27 @@ impl Default for EncounterId {
     fn default() -> Self { Self(Uuid::nil()) }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl From<EncounterId> for Uuid {
+    fn from(id: EncounterId) -> Self { id.0 }
+}
+
+impl From<Uuid> for EncounterId {
+    fn from(id: Uuid) -> Self { Self(id) }
+}
+
+impl std::fmt::Display for EncounterId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EncounterKind { Combat, Diplomacy, Puzzle, Story, Random }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EncounterStatus { Planned, Active, Resolved, Abandoned, DeadEnded }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 pub enum EncounterError {
     #[error("encounter is not planned")]
     NotPlanned,
@@ -29,7 +45,7 @@ pub enum EncounterError {
     NotActive,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Encounter {
     id: EncounterId,
     session_id: SessionId,
@@ -58,7 +74,7 @@ impl Default for Encounter {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EncounterEvent {
     Planned { id: EncounterId, session_id: SessionId, story_id: StoryId, owner: UserId, kind: EncounterKind, description: Prose },
     Improvised { id: EncounterId, session_id: SessionId, story_id: StoryId, owner: UserId, kind: EncounterKind, description: Prose },
@@ -68,7 +84,7 @@ pub enum EncounterEvent {
     DeadEnded { reason: Prose },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EncounterCommand {
     Plan { session_id: SessionId, story_id: StoryId, owner: UserId, kind: EncounterKind, description: Prose },
     Improvise { session_id: SessionId, story_id: StoryId, owner: UserId, kind: EncounterKind, description: Prose },
@@ -112,9 +128,12 @@ impl Apply<EncounterEvent> for Encounter {
 }
 
 impl Aggregate for Encounter {
+    type Id = EncounterId;
     type Command = EncounterCommand;
     type Event = EncounterEvent;
     type Error = EncounterError;
+
+    fn id(&self) -> EncounterId { self.id }
 
     fn handle(&self, command: EncounterCommand) -> Result<Vec<EncounterEvent>, EncounterError> {
         match command {

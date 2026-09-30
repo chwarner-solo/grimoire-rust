@@ -10,9 +10,9 @@ where new code belongs and how the layers stay decoupled.
 
 | Flow | Trigger | Path |
 |---|---|---|
-| [1. DM Command](#1-dm-command) | DM issues a command via CLI | CLI → app → domain → event-store → projections |
-| [2. Aggregate Load](#2-aggregate-load) | app needs current aggregate state | app → aggregate-store + event-store → domain |
-| [3. Projection Update](#3-projection-update) | New event file written to disk | event-store → notify → projections |
+| [1. DM Command](#1-dm-command) | DM issues a command via REST API or CLI | API/CLI → app → domain → event-store → event-bus → projections |
+| [2. Aggregate Load](#2-aggregate-load) | app needs current aggregate state | app → RAM cache → snapshot-store → event-store → domain |
+| [3. Projection Update](#3-projection-update) | New events appended to event store | event-bus → EventProjection handlers |
 | [4. AI Query](#4-ai-query) | AI requests story state via MCP | AI → mcp → projections |
 
 ---
@@ -23,164 +23,148 @@ The most common flow. The DM issues an instruction — a character departs,
 a quest is completed, a session closes.
 
 ```
-DM input
+DM input (HTTP request or CLI)
    │
    ▼
 ┌─────────┐
-│   cli   │  parses input, builds Command struct
+│  api    │  authenticates JWT, extracts UserId
+│  or cli │  routes to the right service method
 └────┬────┘
-     │  CharacterCommand::Depart { session_id }
+     │  e.g. character_service.depart(id, session_id)
      ▼
-┌─────────┐
-│   app   │  command handler
-│         │  1. loads current aggregate state  ──→ see Flow 2
-│         │  2. calls aggregate.handle(command)
-│         │  3. receives Vec<CharacterEvent>
-└────┬────┘
-     │  Vec<CharacterEvent>
-     ▼
+┌─────────────────────────────┐
+│  app / CharacterService     │
+│                             │
+│  1. repository.load(id)  ──→ see Flow 2
+│  2. character.handle(Depart)
+│  3. repository.save(id, events)
+└────────────────┬────────────┘
+                 │  internally:
+                 ▼
 ┌────────────────────┐
 │  adapters/         │
-│  event-store       │  serialises each event to JSON
-│                    │  writes to:
-│                    │  {owner}/{story}/character/{id}/{uuid_v7}.json
-└────────────────────┘
-     │  new file on disk
-     ▼
+│  FsEventStore      │  appends each event as a JSON line
+│                    │  to: {data_dir}/characters/events/{id}.jsonl
+└────────┬───────────┘
+         │
+         ▼
+┌────────────────────┐
+│  adapters/         │
+│  FsSnapshotStore   │  writes updated aggregate state
+│                    │  to: {data_dir}/characters/snapshots/{id}.json
+└────────┬───────────┘
+         │
+         ▼
+  EventBus publishes each new event
   (triggers Flow 3 — projection update)
 ```
 
-**What the app layer does:**
-
-The `app` command handler is the orchestrator. It never touches the file
-system directly — it calls port traits defined in `app` and implemented by
-the adapters:
+**Port traits in `app`:**
 
 ```rust
-// port defined in app, implemented by adapters/event-store
-trait EventStore {
-    fn append(&self, stream: StreamId, events: Vec<SerializedEvent>);
-    fn load(&self, stream: StreamId) -> Vec<SerializedEvent>;
+// The only interface use cases see
+trait AggregateRepository<A: Aggregate> {
+    async fn load(&self, id: A::Id) -> Result<A, RepositoryError>;
+    async fn save(&self, id: A::Id, events: Vec<A::Event>) -> Result<(), RepositoryError>;
 }
 
-// port defined in app, implemented by adapters/aggregate-store
-trait AggregateStore {
-    fn load_snapshot<A: Aggregate>(&self, id: AggregateId) -> Option<(A, SequenceNumber)>;
-    fn save_snapshot<A: Aggregate>(&self, id: AggregateId, aggregate: A, seq: SequenceNumber);
+// Durable append-only log
+trait EventStore<E> {
+    async fn append(&self, aggregate_id: Uuid, events: &[E]) -> Result<u64, EventStoreError>;
+    async fn load(&self, aggregate_id: Uuid) -> Result<Vec<EventEnvelope<E>>, EventStoreError>;
+    async fn load_from(&self, aggregate_id: Uuid, after_sequence: u64) -> ...;
+}
+
+// Snapshot for fast cold-start
+trait SnapshotStore<A: Aggregate> {
+    async fn load(&self, id: A::Id) -> Result<Option<(A, u64)>, SnapshotError>;
+    async fn save(&self, id: A::Id, state: &A, sequence: u64) -> Result<(), SnapshotError>;
 }
 ```
 
-**Command source is stamped on the event envelope:**
+**Event envelope written to the JSONL file:**
 
 ```json
-{
-  "type": "CharacterDeparted",
-  "at": "2026-09-27T14:32:00Z",
-  "source": "Dm",
-  "session_id": "01j4z...",
-  "data": {}
-}
+{"aggregate_id":"550e8400-…","sequence":5,"occurred_at":"2026-09-30T…","payload":{"Departed":{"session_id":"01j4z…"}}}
 ```
 
 ---
 
 ## 2. Aggregate Load
 
-Before the `app` layer can call `handle`, it needs the aggregate's current
-state. Replaying all events from the beginning every time would be expensive
-for long-running campaigns. The aggregate store provides a snapshot shortcut.
+Before `app` can call `handle`, it needs the aggregate's current state.
+The `FsAggregateRepository` uses a three-layer lookup. See
+[ADR-012](adr/ADR-012-aggregate-repository.md).
 
 ```
-app needs: current state of Character(id)
+repository.load(character_id)
    │
    ▼
-┌─────────────────┐
-│ aggregate-store │  do we have a snapshot?
-└────────┬────────┘
-         │
-    ┌────┴─────┐
-    │          │
-  yes          no
-    │          │
-    ▼          ▼
-snapshot    Character::default()
-at seq N    at seq 0
-    │          │
-    └────┬─────┘
-         │  seed state + last known sequence number
-         ▼
 ┌──────────────┐
-│ event-store  │  load events after seq N
-│              │  from: {owner}/{story}/character/{id}/
-│              │  sorted by UUID v7 filename (time order)
+│  L1 RAM cache│  hit? return immediately (no I/O)
 └──────┬───────┘
-       │  Vec<CharacterEvent> from seq N+1 onwards
+       │ miss
        ▼
-┌───────────────────────────────────┐
-│  domain                           │
-│                                   │
-│  events.fold(seed, Character::apply)  │
-│                                   │
-│  → current Character state        │
-└───────────────────────────────────┘
+┌──────────────────────────┐
+│  L2 FsSnapshotStore      │  read {data_dir}/characters/snapshots/{id}.json
+│                          │  → (Character state, last_sequence)
+│                          │  or (Character::default(), 0) if no snapshot
+└──────┬───────────────────┘
+       │  seed + sequence N
+       ▼
+┌──────────────────────────┐
+│  L3 FsEventStore         │  read {data_dir}/characters/events/{id}.jsonl
+│                          │  skip lines where sequence ≤ N
+│                          │  → Vec<CharacterEvent> from N+1 onwards
+└──────┬───────────────────┘
        │
        ▼
-  app calls handle(command)
+  events.fold(seed, Character::apply)
        │
        ▼
-  new snapshot saved to aggregate-store
+  current Character state
+  → stored in RAM cache
+  → returned to use case
 ```
-
-**Why this matters:**
-
-The aggregate store is not just a performance optimisation — it is also
-the **DM working view**. When a DM opens a character to issue a command,
-the aggregate store provides the fully-reconstituted state they are
-editing against. See [ADR-005](adr/ADR-005-aggregate-traits.md).
 
 ---
 
 ## 3. Projection Update
 
-Projections are materialised views built from events. They are kept up to
-date by an event listener that watches for new files on disk.
+After events are appended to the event store, the `EventBus` fans them out
+to registered `EventProjection` handlers. Projections maintain materialised
+views for fast reads (Neo4j for search, BigQuery/Athena for analytics).
 
 ```
-new file written:
-{owner}/{story}/character/{id}/{uuid_v7}.json
+repository.save() completes
    │
    ▼
 ┌────────────────────┐
-│  notify watcher    │  OS-level file system event
-│  (inotify / FSEvents)  path tells us aggregate type + id
-│                    │  before the file is opened
-└────────┬───────────┘
-         │  FileCreated { path }
-         ▼
-┌────────────────────┐
-│  adapters/         │
-│  projections       │  reads + deserialises event from file
-│                    │  routes to the right projection handler
-│                    │  updates materialised view(s)
-└────────────────────┘
+│  EventBus          │  publishes each EventEnvelope<DomainEvent>
+│                    │  to all registered EventProjection handlers
+└───┬────────────────┘
+    │
+    ├──→ Neo4j projection      (graph: characters ↔ quests ↔ sessions)
+    ├──→ BigQuery/Athena        (analytics / AI context queries)
+    └──→ (future) other sinks
 ```
 
-**The event listener port:**
+**Port traits in `app`:**
 
 ```rust
-// port defined in app
-trait EventListener {
-    fn listen(&self) -> impl Stream<Item = EventEnvelope>;
+// Fan-out after a successful store append
+trait EventBus<E> {
+    async fn publish(&self, envelope: &EventEnvelope<E>) -> Result<(), BusError>;
 }
 
-// implemented by:
-//   adapters/event-store  → notify watching local directories
-//   future: adapters/gcs  → GCP Pub/Sub on bucket writes
-//   future: adapters/s3   → S3 Event Notifications via SQS
+// Downstream read model handler
+trait EventProjection<E> {
+    async fn project(&self, envelope: &EventEnvelope<E>) -> Result<(), ProjectionError>;
+}
 ```
 
-Switching from local files to cloud storage means replacing the
-`EventListener` implementation — nothing else changes.
+The production event bus will be GCP Pub/Sub or Kafka. For local dev an
+in-process bus calls projections directly without any message broker.
 See [ADR-004](adr/ADR-004-hexagonal-architecture.md).
 
 **Idempotency:**

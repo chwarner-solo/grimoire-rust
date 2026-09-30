@@ -1,9 +1,11 @@
+use serde::{Deserialize, Serialize};
+
 use crate::shared::{Metadata, Prose, UserId};
 use crate::story::StoryId;
 use crate::traits::{Aggregate, Apply};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SessionId(Uuid);
 
 impl SessionId {
@@ -14,10 +16,24 @@ impl Default for SessionId {
     fn default() -> Self { Self(Uuid::nil()) }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl From<SessionId> for Uuid {
+    fn from(id: SessionId) -> Self { id.0 }
+}
+
+impl From<Uuid> for SessionId {
+    fn from(id: Uuid) -> Self { Self(id) }
+}
+
+impl std::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionStatus { Planned, Active, Closed }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 pub enum SessionError {
     #[error("session is not planned")]
     NotPlanned,
@@ -27,7 +43,7 @@ pub enum SessionError {
     AlreadyClosed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
     id: SessionId,
     story_id: StoryId,
@@ -54,7 +70,7 @@ impl Default for Session {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionEvent {
     Created { id: SessionId, story_id: StoryId, owner: UserId, number: u32, date: String, notes: Prose },
     Opened,
@@ -63,7 +79,7 @@ pub enum SessionEvent {
     Closed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionCommand {
     Create { story_id: StoryId, owner: UserId, number: u32, date: String, notes: Prose },
     Open,
@@ -94,9 +110,12 @@ impl Apply<SessionEvent> for Session {
 }
 
 impl Aggregate for Session {
+    type Id = SessionId;
     type Command = SessionCommand;
     type Event = SessionEvent;
     type Error = SessionError;
+
+    fn id(&self) -> SessionId { self.id }
 
     fn handle(&self, command: SessionCommand) -> Result<Vec<SessionEvent>, SessionError> {
         match command {

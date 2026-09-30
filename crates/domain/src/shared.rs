@@ -1,6 +1,7 @@
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Hash, Serialize, Deserialize)]
 pub struct UserId(Uuid);
 
 impl UserId {
@@ -12,7 +13,13 @@ impl Default for UserId {
     fn default() -> Self { Self(Uuid::nil()) }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+impl std::fmt::Display for UserId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize)]
 pub struct Metadata { owner: UserId }
 
 impl Metadata {
@@ -24,13 +31,11 @@ impl Default for Metadata {
     fn default() -> Self { Self { owner: UserId::default() } }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Prose(String);
 
 impl Prose {
-    pub(crate) fn new(prose: &str) -> Self {
-        Prose(prose.to_owned())
-    }
+    pub fn new(prose: &str) -> Self { Prose(prose.to_owned()) }
     pub fn as_str(&self) -> &str { &self.0 }
 }
 
@@ -38,13 +43,13 @@ impl Default for Prose {
     fn default() -> Self { Self(String::new()) }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 pub enum NameError {
     #[error("name must not be empty")]
     Empty,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Name(String);
 
 impl Name {

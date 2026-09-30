@@ -1,6 +1,17 @@
 [package]
-name = "cli"
+name = "grimoire"
 edition.workspace = true
 version.workspace = true
 
+[[bin]]
+name = "grimoire"
+path = "src/main.rs"
+
 [dependencies]
+api = { path = "../api" }
+
+# Binary-only: runtime, HTTP server, logging
+axum = "0.7"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::character::CharacterId;
 use crate::session::SessionId;
 use crate::shared::{Metadata, Name, NameError, Prose, UserId};
@@ -5,10 +7,10 @@ use crate::story::StoryId;
 use crate::traits::{Aggregate, Apply};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QuestKind { Main, Side, Personal, Crafting }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 pub enum QuestError {
     #[error(transparent)]
     Name(#[from] NameError),
@@ -20,7 +22,7 @@ pub enum QuestError {
     MissingCharacter,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct QuestId(Uuid);
 
 impl QuestId {
@@ -31,10 +33,24 @@ impl Default for QuestId {
     fn default() -> Self { Self(Uuid::nil()) }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl From<QuestId> for Uuid {
+    fn from(id: QuestId) -> Self { id.0 }
+}
+
+impl From<Uuid> for QuestId {
+    fn from(id: Uuid) -> Self { Self(id) }
+}
+
+impl std::fmt::Display for QuestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QuestStatus { Active, Completed, Failed, Abandoned }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Quest {
     id: QuestId,
     story_id: StoryId,
@@ -61,7 +77,7 @@ impl Default for Quest {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QuestEvent {
     Created { id: QuestId, story_id: StoryId, owner: UserId, name: Name, description: Prose, kind: QuestKind, character_id: Option<CharacterId> },
     Completed { session_id: Option<SessionId> },
@@ -71,7 +87,7 @@ pub enum QuestEvent {
     DescriptionUpdated { description: Prose },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QuestCommand {
     Create { story_id: StoryId, owner: UserId, name: Name, description: Prose, kind: QuestKind, character_id: Option<CharacterId> },
     Complete { session_id: Option<SessionId> },
@@ -104,9 +120,12 @@ impl Apply<QuestEvent> for Quest {
 }
 
 impl Aggregate for Quest {
+    type Id = QuestId;
     type Command = QuestCommand;
     type Event = QuestEvent;
     type Error = QuestError;
+
+    fn id(&self) -> QuestId { self.id }
 
     fn handle(&self, command: QuestCommand) -> Result<Vec<QuestEvent>, QuestError> {
         match command {

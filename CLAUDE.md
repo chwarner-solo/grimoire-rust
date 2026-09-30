@@ -16,7 +16,7 @@ Key facts to always keep in mind:
 - The event log is **immutable**. Corrections are compensating events.
 - The AI can only write **state-change commands**, never free-form edits.
 - Story creation is **incremental** — no completion required before play begins.
-- **Five aggregates**: Story, Character, Quest, Location, Session, Encounter.
+- **Six aggregates**: Story, Character, Quest, Location, Session, Encounter.
 
 See `README.md` for the full picture. See `docs/` for decisions and domain detail.
 
@@ -27,8 +27,8 @@ See `README.md` for the full picture. See `docs/` for decisions and domain detai
 These are hard constraints. Do not violate them.
 
 ```
-cli / mcp  →  app  →  domain
-adapters/* →  app  →  domain
+api / cli / mcp  →  app  →  domain
+adapters/*       →  app  →  domain
 ```
 
 | Rule | Why |
@@ -151,26 +151,41 @@ A two-sentence clarification is faster than refactoring after the fact.
 
 | Crate | Status | Notes |
 |---|---|---|
-| `domain` | Built | All 5 aggregates. Session and Encounter not yet coded. |
-| `app` | Stub | Port traits and use cases not yet written |
-| `adapters/*` | Stub | No adapters implemented yet |
-| `cli` | Stub | Entry point only |
+| `domain` | Complete | All 6 aggregates, 46 passing tests |
+| `app` | Complete | Port traits, use cases, `AppError`. Services instrument with `tracing`. |
+| `adapters` | Complete | `FsAggregateRepository` — RAM cache → JSON snapshot → JSONL event store |
+| `api` | Complete | axum REST API, JWT/JWKS middleware, DM + player route trees |
+| `cli` (binary: `grimoire`) | Complete | Starts axum server; reads config from env vars |
+| `mcp` | Not started | MCP server for AI assistant interface |
 
-**Next up in domain:** Session aggregate, then Encounter aggregate.
-Session needs `QuestKind`, `character_id` on Quest, and `session_id` on
-state-change commands across all aggregates.
+**Entry point:** `JWKS_URI=... ISSUER=... AUDIENCE=... cargo run -p grimoire`
 
-**After domain:** Define port traits in `app`, then implement `adapters/event-store`.
+**Key env vars:**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `JWKS_URI` | required | OIDC provider JWKS endpoint |
+| `ISSUER` | required | Expected `iss` claim |
+| `AUDIENCE` | required | Expected `aud` claim |
+| `DATA_DIR` | `./data` | Root directory for event and snapshot files |
+| `PORT` | `3000` | HTTP listen port |
+| `LOG_FORMAT` | `pretty` | `json` for CloudWatch/Cloud Logging, `pretty` for local dev |
+| `RUST_LOG` | `grimoire=info,tower_http=debug` | Log level filter |
+
+**Next up:** MCP server (`crates/mcp`), Neo4j projection adapter, BigQuery/Athena projection adapter.
 
 ---
 
 ## Running the Project
 
 ```bash
-cargo build          # build everything
-cargo test           # run all tests
-cargo test -p domain # domain tests only (24 tests, all should pass)
+cargo build                  # build everything
+cargo build --release -p grimoire  # build the production binary
+cargo test                   # run all tests (46 domain tests + integration)
+cargo test -p domain         # domain tests only (46 tests, all should pass)
 ```
 
-If tests fail on a clean checkout, something is wrong — the domain is the
-stable layer and its tests should always be green.
+If domain tests fail on a clean checkout, something is wrong — the domain is
+the stable layer and its tests should always be green.
+
+See `docs/openapi.yaml` for the full REST API specification.

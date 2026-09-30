@@ -1,10 +1,12 @@
+use serde::{Deserialize, Serialize};
+
 use crate::session::SessionId;
 use crate::shared::{Metadata, Name, NameError, Prose, UserId};
 use crate::story::StoryId;
 use crate::traits::{Aggregate, Apply};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 pub enum LocationError {
     #[error(transparent)]
     Name(#[from] NameError),
@@ -12,7 +14,7 @@ pub enum LocationError {
     AlreadyDestroyed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LocationId(Uuid);
 
 impl LocationId {
@@ -23,10 +25,24 @@ impl Default for LocationId {
     fn default() -> Self { Self(Uuid::nil()) }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl From<LocationId> for Uuid {
+    fn from(id: LocationId) -> Self { id.0 }
+}
+
+impl From<Uuid> for LocationId {
+    fn from(id: Uuid) -> Self { Self(id) }
+}
+
+impl std::fmt::Display for LocationId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LocationStatus { Known, Visited, Destroyed }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Location {
     id: LocationId,
     story_id: StoryId,
@@ -49,7 +65,7 @@ impl Default for Location {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LocationEvent {
     Created { id: LocationId, story_id: StoryId, owner: UserId, name: Name, description: Prose },
     Visited { session_id: Option<SessionId> },
@@ -58,7 +74,7 @@ pub enum LocationEvent {
     DescriptionUpdated { description: Prose },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LocationCommand {
     Create { story_id: StoryId, owner: UserId, name: Name, description: Prose },
     Visit { session_id: Option<SessionId> },
@@ -87,9 +103,12 @@ impl Apply<LocationEvent> for Location {
 }
 
 impl Aggregate for Location {
+    type Id = LocationId;
     type Command = LocationCommand;
     type Event = LocationEvent;
     type Error = LocationError;
+
+    fn id(&self) -> LocationId { self.id }
 
     fn handle(&self, command: LocationCommand) -> Result<Vec<LocationEvent>, LocationError> {
         match command {

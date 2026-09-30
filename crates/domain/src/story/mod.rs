@@ -1,12 +1,14 @@
+use serde::{Deserialize, Serialize};
+
 use crate::shared::{Metadata, Prose, UserId};
 use crate::traits::{Aggregate, Apply};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Story { id: StoryId, metadata: Metadata, title: Title, prose: Prose, status: StoryStatus }
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Hash, Serialize, Deserialize)]
 pub struct StoryId(uuid::Uuid);
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Title(String);
 
 impl StoryId {
@@ -17,24 +19,38 @@ impl Default for StoryId {
     fn default() -> Self { Self(uuid::Uuid::nil()) }
 }
 
+impl From<StoryId> for uuid::Uuid {
+    fn from(id: StoryId) -> Self { id.0 }
+}
+
+impl From<uuid::Uuid> for StoryId {
+    fn from(id: uuid::Uuid) -> Self { Self(id) }
+}
+
+impl std::fmt::Display for StoryId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl Default for Title {
     fn default() -> Self { Self(String::new()) }
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 pub enum TitleError {
     #[error("title must not be empty")]
     Empty,
 }
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 pub enum StoryError {
     #[error(transparent)]
     Title(#[from] TitleError),
     #[error("invalid story")]
     InvalidCommand,
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StoryEvent {
     Created { id: StoryId, user_id: UserId, title: Title, prose: Prose },
     TitleUpdated { title: Title },
@@ -42,7 +58,7 @@ pub enum StoryEvent {
     Closed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StoryCommand {
     Create { owner: UserId, title: Title, prose: Prose },
     UpdateTitle { title: Title},
@@ -50,7 +66,7 @@ pub enum StoryCommand {
     Close,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StoryStatus {
     Active,
     Inactive,
@@ -68,7 +84,7 @@ impl Story {
     }
     pub fn metadata(&self) -> &Metadata{ &self.metadata }
     pub fn prose(&self) -> &Prose { &self.prose }
-    pub fn id(&self) -> &StoryId { &self.id }
+    pub fn id(&self) -> StoryId { self.id }
     pub fn title(&self) -> &Title { &self.title }
     pub fn status(&self) -> &StoryStatus { &self.status }
 }
@@ -87,9 +103,12 @@ impl Apply<StoryEvent> for Story {
 }
 
 impl Aggregate for Story {
+    type Id = StoryId;
     type Command = StoryCommand;
     type Event = StoryEvent;
     type Error = StoryError;
+
+    fn id(&self) -> StoryId { self.id }
 
     fn handle(&self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error> {
         match command {

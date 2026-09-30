@@ -1,10 +1,12 @@
+use serde::{Deserialize, Serialize};
+
 use crate::session::SessionId;
 use crate::shared::{Metadata, Name, NameError, Prose, UserId};
 use crate::story::StoryId;
 use crate::traits::{Aggregate, Apply};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 pub enum CharacterError {
     #[error(transparent)]
     Name(#[from] NameError),
@@ -14,7 +16,7 @@ pub enum CharacterError {
     AlreadyDeceased,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CharacterId(Uuid);
 
 impl CharacterId {
@@ -25,13 +27,27 @@ impl Default for CharacterId {
     fn default() -> Self { Self(Uuid::nil()) }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl From<CharacterId> for Uuid {
+    fn from(id: CharacterId) -> Self { id.0 }
+}
+
+impl From<Uuid> for CharacterId {
+    fn from(id: Uuid) -> Self { Self(id) }
+}
+
+impl std::fmt::Display for CharacterId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CharacterKind { PlayerCharacter, NonPlayer }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CharacterStatus { Active, Departed, Deceased }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Character {
     id: CharacterId,
     story_id: StoryId,
@@ -56,7 +72,7 @@ impl Default for Character {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CharacterEvent {
     Created { id: CharacterId, story_id: StoryId, owner: UserId, name: Name, backstory: Prose, kind: CharacterKind },
     Departed { session_id: Option<SessionId> },
@@ -65,7 +81,7 @@ pub enum CharacterEvent {
     BackstoryUpdated { backstory: Prose },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CharacterCommand {
     Create { story_id: StoryId, owner: UserId, name: Name, backstory: Prose, kind: CharacterKind },
     Depart { session_id: Option<SessionId> },
@@ -95,9 +111,12 @@ impl Apply<CharacterEvent> for Character {
 }
 
 impl Aggregate for Character {
+    type Id = CharacterId;
     type Command = CharacterCommand;
     type Event = CharacterEvent;
     type Error = CharacterError;
+
+    fn id(&self) -> CharacterId { self.id }
 
     fn handle(&self, command: CharacterCommand) -> Result<Vec<CharacterEvent>, CharacterError> {
         match command {

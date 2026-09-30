@@ -1,0 +1,879 @@
+openapi: "3.0.3"
+info:
+  title: Grimoire API
+  version: "0.1.0"
+  description: |
+    Event-sourced TTRPG campaign manager.
+    All write routes emit domain events; reads return the current aggregate snapshot.
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # ── Shared ──────────────────────────────────────────────────────────────
+    Id:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    WithSession:
+      type: object
+      properties:
+        session_id:
+          type: string
+          format: uuid
+          nullable: true
+
+    # ── Enums ────────────────────────────────────────────────────────────────
+    CharacterKind:
+      type: string
+      enum: [PlayerCharacter, NonPlayer]
+
+    CharacterStatus:
+      type: string
+      enum: [Active, Departed, Deceased]
+
+    QuestKind:
+      type: string
+      enum: [Main, Side, Personal, Crafting]
+
+    QuestStatus:
+      type: string
+      enum: [Active, Completed, Failed, Abandoned]
+
+    LocationStatus:
+      type: string
+      enum: [Known, Visited, Destroyed]
+
+    SessionStatus:
+      type: string
+      enum: [Planned, Active, Closed]
+
+    EncounterKind:
+      type: string
+      enum: [Combat, Diplomacy, Puzzle, Story, Random]
+
+    EncounterStatus:
+      type: string
+      enum: [Planned, Active, Resolved, Abandoned, DeadEnded]
+
+    StoryStatus:
+      type: string
+      enum: [Active, Inactive]
+
+    # ── Aggregates ──────────────────────────────────────────────────────────
+    Story:
+      type: object
+      properties:
+        id:        { type: string, format: uuid }
+        title:     { type: string }
+        prose:     { type: string }
+        status:    { $ref: "#/components/schemas/StoryStatus" }
+        metadata:  { $ref: "#/components/schemas/Metadata" }
+
+    Character:
+      type: object
+      properties:
+        id:         { type: string, format: uuid }
+        story_id:   { type: string, format: uuid }
+        name:       { type: string }
+        backstory:  { type: string }
+        kind:       { $ref: "#/components/schemas/CharacterKind" }
+        status:     { $ref: "#/components/schemas/CharacterStatus" }
+        metadata:   { $ref: "#/components/schemas/Metadata" }
+
+    Quest:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        story_id:     { type: string, format: uuid }
+        name:         { type: string }
+        description:  { type: string }
+        kind:         { $ref: "#/components/schemas/QuestKind" }
+        character_id: { type: string, format: uuid, nullable: true }
+        status:       { $ref: "#/components/schemas/QuestStatus" }
+        metadata:     { $ref: "#/components/schemas/Metadata" }
+
+    Location:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        story_id:    { type: string, format: uuid }
+        name:        { type: string }
+        description: { type: string }
+        status:      { $ref: "#/components/schemas/LocationStatus" }
+        metadata:    { $ref: "#/components/schemas/Metadata" }
+
+    Session:
+      type: object
+      properties:
+        id:       { type: string, format: uuid }
+        story_id: { type: string, format: uuid }
+        number:   { type: integer }
+        date:     { type: string, format: date }
+        notes:    { type: string }
+        summary:  { type: string }
+        status:   { $ref: "#/components/schemas/SessionStatus" }
+        metadata: { $ref: "#/components/schemas/Metadata" }
+
+    Encounter:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        session_id:  { type: string, format: uuid }
+        story_id:    { type: string, format: uuid }
+        kind:        { $ref: "#/components/schemas/EncounterKind" }
+        description: { type: string }
+        outcome:     { type: string, nullable: true }
+        reason:      { type: string, nullable: true }
+        status:      { $ref: "#/components/schemas/EncounterStatus" }
+        metadata:    { $ref: "#/components/schemas/Metadata" }
+
+    Metadata:
+      type: object
+      properties:
+        owner: { type: string, format: uuid }
+
+paths:
+  # ── Health ────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Server is up
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ok
+
+  # ── DM — Stories ──────────────────────────────────────────────────────────
+  /dm/stories:
+    post:
+      summary: Create a story
+      tags: [DM — Stories]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, prose]
+              properties:
+                title: { type: string }
+                prose: { type: string }
+      responses:
+        "201": { $ref: "#/components/responses/Created" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /dm/stories/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Get a story
+      tags: [DM — Stories]
+      responses:
+        "200":
+          description: Story
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Story" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/stories/{id}/title:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Update story title
+      tags: [DM — Stories]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+      responses:
+        "204": { description: Updated }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/stories/{id}/prose:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Update story prose
+      tags: [DM — Stories]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prose]
+              properties:
+                prose: { type: string }
+      responses:
+        "204": { description: Updated }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/stories/{id}/close:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Close a story
+      tags: [DM — Stories]
+      responses:
+        "204": { description: Closed }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ── DM — Characters ───────────────────────────────────────────────────────
+  /dm/stories/{story_id}/characters:
+    parameters:
+      - { name: story_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Create a character
+      tags: [DM — Characters]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, backstory, kind]
+              properties:
+                name:      { type: string }
+                backstory: { type: string }
+                kind:      { $ref: "#/components/schemas/CharacterKind" }
+      responses:
+        "201": { $ref: "#/components/responses/Created" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /dm/characters/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Get a character
+      tags: [DM — Characters]
+      responses:
+        "200":
+          description: Character
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Character" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/characters/{id}/name:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Rename a character
+      tags: [DM — Characters]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "204": { description: Updated }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/characters/{id}/backstory:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Update character backstory
+      tags: [DM — Characters]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [backstory]
+              properties:
+                backstory: { type: string }
+      responses:
+        "204": { description: Updated }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/characters/{id}/depart:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Mark a character as departed
+      tags: [DM — Characters]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WithSession" }
+      responses:
+        "204": { description: Departed }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  /dm/characters/{id}/kill:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Mark a character as deceased
+      tags: [DM — Characters]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WithSession" }
+      responses:
+        "204": { description: Deceased }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  # ── DM — Quests ───────────────────────────────────────────────────────────
+  /dm/stories/{story_id}/quests:
+    parameters:
+      - { name: story_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Create a quest
+      tags: [DM — Quests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, description, kind]
+              properties:
+                name:         { type: string }
+                description:  { type: string }
+                kind:         { $ref: "#/components/schemas/QuestKind" }
+                character_id: { type: string, format: uuid, nullable: true }
+      responses:
+        "201": { $ref: "#/components/responses/Created" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  /dm/quests/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Get a quest
+      tags: [DM — Quests]
+      responses:
+        "200":
+          description: Quest
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Quest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/quests/{id}/name:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Rename a quest
+      tags: [DM — Quests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "204": { description: Updated }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/quests/{id}/description:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Update quest description
+      tags: [DM — Quests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description]
+              properties:
+                description: { type: string }
+      responses:
+        "204": { description: Updated }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/quests/{id}/complete:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Complete a quest
+      tags: [DM — Quests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WithSession" }
+      responses:
+        "204": { description: Completed }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  /dm/quests/{id}/fail:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Fail a quest
+      tags: [DM — Quests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WithSession" }
+      responses:
+        "204": { description: Failed }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  /dm/quests/{id}/abandon:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Abandon a quest
+      tags: [DM — Quests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WithSession" }
+      responses:
+        "204": { description: Abandoned }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  # ── DM — Locations ────────────────────────────────────────────────────────
+  /dm/stories/{story_id}/locations:
+    parameters:
+      - { name: story_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Create a location
+      tags: [DM — Locations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, description]
+              properties:
+                name:        { type: string }
+                description: { type: string }
+      responses:
+        "201": { $ref: "#/components/responses/Created" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /dm/locations/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Get a location
+      tags: [DM — Locations]
+      responses:
+        "200":
+          description: Location
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Location" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/locations/{id}/name:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Rename a location
+      tags: [DM — Locations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "204": { description: Updated }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/locations/{id}/description:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Update location description
+      tags: [DM — Locations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description]
+              properties:
+                description: { type: string }
+      responses:
+        "204": { description: Updated }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/locations/{id}/visit:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Mark a location as visited
+      tags: [DM — Locations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WithSession" }
+      responses:
+        "204": { description: Visited }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  /dm/locations/{id}/destroy:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Destroy a location
+      tags: [DM — Locations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WithSession" }
+      responses:
+        "204": { description: Destroyed }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  # ── DM — Sessions ─────────────────────────────────────────────────────────
+  /dm/stories/{story_id}/sessions:
+    parameters:
+      - { name: story_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Create a session
+      tags: [DM — Sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [number, date, notes]
+              properties:
+                number: { type: integer, minimum: 1 }
+                date:   { type: string, format: date }
+                notes:  { type: string }
+      responses:
+        "201": { $ref: "#/components/responses/Created" }
+
+  /dm/sessions/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Get a session
+      tags: [DM — Sessions]
+      responses:
+        "200":
+          description: Session
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/sessions/{id}/open:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Open a session (Planned → Active)
+      tags: [DM — Sessions]
+      responses:
+        "204": { description: Opened }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  /dm/sessions/{id}/notes:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Update session notes
+      tags: [DM — Sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [notes]
+              properties:
+                notes: { type: string }
+      responses:
+        "204": { description: Updated }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  /dm/sessions/{id}/summary:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Write or update the session summary
+      tags: [DM — Sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [summary]
+              properties:
+                summary: { type: string }
+      responses:
+        "204": { description: Updated }
+
+  /dm/sessions/{id}/close:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Close a session (Active → Closed)
+      tags: [DM — Sessions]
+      responses:
+        "204": { description: Closed }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  # ── DM — Encounters ───────────────────────────────────────────────────────
+  /dm/sessions/{session_id}/encounters/plan:
+    parameters:
+      - { name: session_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Plan an encounter for a session
+      tags: [DM — Encounters]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [story_id, kind, description]
+              properties:
+                story_id:    { type: string, format: uuid }
+                kind:        { $ref: "#/components/schemas/EncounterKind" }
+                description: { type: string }
+      responses:
+        "201": { $ref: "#/components/responses/Created" }
+
+  /dm/sessions/{session_id}/encounters/improvise:
+    parameters:
+      - { name: session_id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Improvise an encounter (created Active, no planning)
+      tags: [DM — Encounters]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [story_id, kind, description]
+              properties:
+                story_id:    { type: string, format: uuid }
+                kind:        { $ref: "#/components/schemas/EncounterKind" }
+                description: { type: string }
+      responses:
+        "201": { $ref: "#/components/responses/Created" }
+
+  /dm/encounters/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Get an encounter
+      tags: [DM — Encounters]
+      responses:
+        "200":
+          description: Encounter
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Encounter" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /dm/encounters/{id}/activate:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Activate a planned encounter
+      tags: [DM — Encounters]
+      responses:
+        "204": { description: Activated }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  /dm/encounters/{id}/resolve:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Resolve an encounter with an outcome
+      tags: [DM — Encounters]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome]
+              properties:
+                outcome: { type: string }
+      responses:
+        "204": { description: Resolved }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  /dm/encounters/{id}/abandon:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Abandon a planned encounter
+      tags: [DM — Encounters]
+      responses:
+        "204": { description: Abandoned }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  /dm/encounters/{id}/dead-end:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Mark a planned encounter as dead-ended
+      tags: [DM — Encounters]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        "204": { description: Dead-ended }
+        "422": { $ref: "#/components/responses/DomainError" }
+
+  # ── Player — Characters ───────────────────────────────────────────────────
+  /player/characters/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Get own character
+      tags: [Player — Characters]
+      responses:
+        "200":
+          description: Character
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Character" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /player/characters/{id}/name:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Rename own character
+      tags: [Player — Characters]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "204": { description: Updated }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /player/characters/{id}/backstory:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Update own character backstory
+      tags: [Player — Characters]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [backstory]
+              properties:
+                backstory: { type: string }
+      responses:
+        "204": { description: Updated }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ── Shared response components ─────────────────────────────────────────────
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Created:
+      description: Resource created
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Id" }
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+    BadRequest:
+      description: Validation error (empty name, blank title, etc.)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+    DomainError:
+      description: Domain rule violation (wrong status, missing required field, etc.)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
