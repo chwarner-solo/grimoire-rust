@@ -25,7 +25,7 @@ where
 impl<A> FsAggregateRepository<A>
 where
     A: Aggregate + Clone + Default + Serialize + DeserializeOwned + Send + Sync + 'static,
-    A::Id: Into<Uuid> + std::fmt::Display + Send + Sync,
+    A::Id: Into<Uuid> + From<Uuid> + std::fmt::Display + Send + Sync,
     A::Event: Serialize + DeserializeOwned + Clone + Send + Sync + 'static,
 {
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
@@ -63,7 +63,7 @@ where
 impl<A> AggregateRepository<A> for FsAggregateRepository<A>
 where
     A: Aggregate + Clone + Default + Serialize + DeserializeOwned + Send + Sync + 'static,
-    A::Id: Into<Uuid> + std::fmt::Display + Send + Sync,
+    A::Id: Into<Uuid> + From<Uuid> + std::fmt::Display + Send + Sync,
     A::Event: Serialize + DeserializeOwned + Clone + Send + Sync + 'static,
 {
     async fn load(&self, id: A::Id) -> Result<A, RepositoryError> {
@@ -91,5 +91,21 @@ where
 
         self.cache.insert(id, new_state).await;
         Ok(())
+    }
+
+    async fn list_all(&self) -> Result<Vec<A>, RepositoryError> {
+        let uuids = self.snapshots.list_ids().await
+            .map_err(RepositoryError::Snapshot)?;
+
+        let mut results = Vec::with_capacity(uuids.len());
+        for uuid in uuids {
+            let id = A::Id::from(uuid);
+            match self.load(id).await {
+                Ok(a) => results.push(a),
+                Err(RepositoryError::NotFound) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(results)
     }
 }

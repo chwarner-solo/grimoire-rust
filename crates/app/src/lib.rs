@@ -91,6 +91,7 @@ where
 {
     async fn load(&self, id: A::Id) -> Result<A, RepositoryError>;
     async fn save(&self, id: A::Id, events: Vec<A::Event>) -> Result<(), RepositoryError>;
+    async fn list_all(&self) -> Result<Vec<A>, RepositoryError>;
 }
 
 /// Append-only event log. Returns the last sequence number after appending.

@@ -85,6 +85,19 @@ impl AuthState {
     }
 
     pub async fn validate(&self, token: &str) -> Result<ValidatedClaims, AuthError> {
+        // Dev bypass — this entire branch is compiled out of release builds.
+        // Accepts the same token the UI's DevLoginBanner sends in development.
+        #[cfg(debug_assertions)]
+        if token == "dev-bypass-token" {
+            tracing::debug!("dev-bypass-token accepted");
+            return Ok(ValidatedClaims {
+                user_id: UserId::from_uuid(
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+                ),
+                sub: "dev-user".to_string(),
+            });
+        }
+
         let header = decode_header(token).map_err(|_| AuthError::InvalidToken)?;
         let kid = header.kid.ok_or(AuthError::MissingKid)?;
 

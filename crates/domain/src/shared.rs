@@ -13,6 +13,10 @@ impl Default for UserId {
     fn default() -> Self { Self(Uuid::nil()) }
 }
 
+impl From<UserId> for Uuid {
+    fn from(id: UserId) -> Self { id.0 }
+}
+
 impl std::fmt::Display for UserId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)

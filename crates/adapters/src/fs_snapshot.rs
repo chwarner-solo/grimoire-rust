@@ -25,6 +25,28 @@ where
     fn path(&self, id: A::Id) -> PathBuf {
         self.dir.join(format!("{id}.json"))
     }
+
+    pub async fn list_ids(&self) -> Result<Vec<uuid::Uuid>, SnapshotError> {
+        let mut ids = Vec::new();
+        let mut entries = match tokio::fs::read_dir(&self.dir).await {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+            Err(e) => return Err(SnapshotError::Failure(e.to_string())),
+        };
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| SnapshotError::Failure(e.to_string()))?
+        {
+            let name = entry.file_name();
+            if let Some(stem) = name.to_string_lossy().strip_suffix(".json") {
+                if let Ok(uuid) = uuid::Uuid::parse_str(stem) {
+                    ids.push(uuid);
+                }
+            }
+        }
+        Ok(ids)
+    }
 }
 
 #[derive(Serialize, Deserialize)]

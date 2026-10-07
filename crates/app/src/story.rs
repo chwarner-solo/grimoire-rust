@@ -35,6 +35,12 @@ impl<R: AggregateRepository<Story>> StoryService<R> {
         Ok(self.repository.load(id).await?)
     }
 
+    #[tracing::instrument(skip(self), fields(owner = %owner))]
+    pub async fn list_by_owner(&self, owner: UserId) -> Result<Vec<Story>, AppError> {
+        let all = self.repository.list_all().await?;
+        Ok(all.into_iter().filter(|s| s.metadata().owner() == owner).collect())
+    }
+
     #[tracing::instrument(skip(self))]
     pub async fn update_title(&self, id: StoryId, title: &str) -> Result<(), AppError> {
         let story = self.repository.load(id).await?;

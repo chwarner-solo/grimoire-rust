@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/api/client.ts","./src/api/stories.ts","./src/auth/authcontext.tsx","./src/auth/devlogin.tsx","./src/components/button.tsx","./src/components/field.tsx","./src/components/layout.tsx","./src/hooks/usestories.ts","./src/pages/storycreate.tsx","./src/pages/storylist.tsx","./src/types/index.ts"],"version":"5.9.3"}

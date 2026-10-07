@@ -6,7 +6,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use domain::story::StoryId;
+use domain::story::{Story, StoryId, StoryStatus};
 
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
@@ -14,11 +14,36 @@ use crate::SharedState;
 
 pub fn router() -> Router<SharedState> {
     Router::new()
-        .route("/stories",            post(create))
+        .route("/stories",            get(list).post(create))
         .route("/stories/:id",        get(get_story))
         .route("/stories/:id/title",  patch(update_title))
         .route("/stories/:id/prose",  patch(update_prose))
         .route("/stories/:id/close",  post(close))
+}
+
+/// Flat API response — stable contract independent of domain struct layout.
+#[derive(Serialize)]
+struct StoryResponse {
+    id: Uuid,
+    owner: Uuid,
+    title: String,
+    prose: String,
+    status: &'static str,
+}
+
+impl From<Story> for StoryResponse {
+    fn from(s: Story) -> Self {
+        Self {
+            id: s.id().into(),
+            owner: s.metadata().owner().into(),
+            title: s.title().as_str().to_owned(),
+            prose: s.prose().as_str().to_owned(),
+            status: match s.status() {
+                StoryStatus::Active   => "Active",
+                StoryStatus::Inactive => "Inactive",
+            },
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -33,6 +58,14 @@ struct TitleBody { title: String }
 #[derive(Deserialize)]
 struct ProseBody { prose: String }
 
+async fn list(
+    State(s): State<SharedState>,
+    AuthenticatedUser(user_id): AuthenticatedUser,
+) -> Result<Json<Vec<StoryResponse>>, ApiError> {
+    let stories = s.stories.list_by_owner(user_id).await?;
+    Ok(Json(stories.into_iter().map(StoryResponse::from).collect()))
+}
+
 async fn create(
     State(s): State<SharedState>,
     AuthenticatedUser(user_id): AuthenticatedUser,
@@ -45,8 +78,8 @@ async fn create(
 async fn get_story(
     State(s): State<SharedState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<domain::story::Story>, ApiError> {
-    Ok(Json(s.stories.get(StoryId::from(id)).await?))
+) -> Result<Json<StoryResponse>, ApiError> {
+    Ok(Json(s.stories.get(StoryId::from(id)).await?.into()))
 }
 
 async fn update_title(

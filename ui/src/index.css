@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-g-bg text-g-text;
+  }
+
+  /* Smooth focus ring consistent with the accent colour */
+  :focus-visible {
+    @apply outline-none ring-2 ring-g-accent/50 ring-offset-2 ring-offset-g-bg;
+  }
+
+  /* Scrollbar styling for dark surfaces */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-g-bg;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-g-border rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-g-muted/40;
+  }
+}

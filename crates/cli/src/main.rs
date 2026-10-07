@@ -5,6 +5,16 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 async fn main() {
     init_logging();
 
+    // In debug builds OIDC vars are optional — the dev-bypass-token path in
+    // auth.rs intercepts before the JWKS URI is ever fetched.
+    // In release builds all three are required and the bypass is compiled out.
+    #[cfg(debug_assertions)]
+    let config = AuthConfig {
+        jwks_uri: std::env::var("JWKS_URI").unwrap_or_else(|_| "http://localhost:9999/.well-known/jwks.json".to_string()),
+        issuer:   std::env::var("ISSUER").unwrap_or_else(|_| "dev".to_string()),
+        audience: std::env::var("AUDIENCE").unwrap_or_else(|_| "dev".to_string()),
+    };
+    #[cfg(not(debug_assertions))]
     let config = AuthConfig {
         jwks_uri:  require_env("JWKS_URI"),
         issuer:    require_env("ISSUER"),
@@ -54,6 +64,7 @@ fn init_logging() {
     }
 }
 
+#[cfg_attr(debug_assertions, allow(dead_code))]
 fn require_env(key: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| panic!("{key} environment variable is required"))
 }
